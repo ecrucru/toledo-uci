@@ -33,28 +33,6 @@
  *
  *	Any name beginning with an underscore "_" is not part of the original library.
  *
- *====================================================================================================
- *
- *	List of interesting positions to validate the UCI output :
- *		- Normal move :
- *			- White : rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
- *			- Black : rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -
- *		- Move with taken piece :
- *			- White : rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -
- *			- Black : rnbqkbnr/ppp1pppp/8/3P4/8/8/PPPP1PPP/RNBQKBNR b KQkq -
- *		- Promotion :
- *			- White : 1k6/7P/1K6/8/8/8/8/8 w - -
- *			- Black : 8/8/8/8/8/1k6/7p/1K6 b - -
- *		- En passant :
- *			- White : 1k6/8/1K6/6pP/8/8/8/8 w - g6
- *			- Black : 1k6/8/1K6/8/5pP1/8/8/8 b - g3
- *		- Short castling :
- *			- White : rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq -
- *			- Black : rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -
- *		- Long castling :
- *			- White : rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w KQkq -
- *			- Black : r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -
- *
 ====================================================================================================*/
 
 
@@ -142,8 +120,9 @@ function X(w, c, h, e, S, s)
 
 
 //-- Initialization
-var	_uciStrength = 2,
-	_uciNodes;
+var	_uciStrength = 4,
+	_uciNodes,
+	_uciLast = '';
 
 var _fs = require('fs');
 _uciReset();
@@ -192,11 +171,12 @@ function _uciWrite(pLine)
 		_fs.writeSync(1, pLine + "\r\n");
 	else
 		console.log(pLine + "\r\n");
+	_uciLast = pLine;
 }
 
 function _uciProcess(pLine)
 {
-	var	_j, _tab, _fen, _list, _promo,
+	var	_j, _x, _y, _buffer, _tab, _fen, _list, _promo,
 		_match, _yold, _levelold, _B, _b,
 		_nodes, _start, _end, _nps;
 
@@ -205,6 +185,8 @@ function _uciProcess(pLine)
 	for (_j=0 ; (_j<10) || (_j<_tab.length) ; _j++)
 		if (typeof _tab[_j] == 'undefined')
 			_tab[_j] = '';
+	if (_tab[0].length > 0)
+		_uciLast = '';
 	switch (_tab[0].toLowerCase())
 	{
 		case 'quit':
@@ -252,13 +234,13 @@ function _uciProcess(pLine)
 				if (!_uciLoadFen(_fen))
 				{
 					_uciWrite('info string Error : invalid FEN ' + _fen);
-					return;
+					return false;
 				}
 			}
 			else if (_tab[1].toLowerCase() == 'startpos')
 				_uciLoadFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0');
 			else
-				return;
+				return false;
 
 			// Proceeds with the additional moves
 			_b = false;
@@ -274,7 +256,7 @@ function _uciProcess(pLine)
 				if (_b && !_uciMove(_tab[_j]))
 				{
 					_uciWrite('info string Error : invalid move history');
-					break;
+					return false;
 				}
 			}
 			break;
@@ -284,18 +266,13 @@ function _uciProcess(pLine)
 		{
 			//- Forced depth
 			_levelold = _uciStrength;
-			switch (_tab[1].toLowerCase())
-			{
-				case '':
-					break;
-				case 'depth':
-					_uciStrength = parseInt(_tab[2]);
+			for (_j=1 ; _j<_tab.length-1 ; _j++)
+				if (_tab[_j].toLowerCase() == 'depth')
+				{
+					_uciStrength = parseInt(_tab[_j+1]);
 					_uciStrength = (_uciStrength <= 0 ? _levelold : Math.max(2, _uciStrength));
 					break;
-				default:
-					_uciWrite('info string Info : unrecognized parameter for the command '+_tab[0]);
-					break;
-			}
+				}
 
 			//- Init
 			_yold = y;
@@ -329,7 +306,174 @@ function _uciProcess(pLine)
 			if (_tab[1] == 'move')
 			{
 				if (!_uciMove(_tab[2]))
+				{
 					_uciWrite('info string Error : invalid move');
+					return false;
+				}
+			}
+			else if (_tab[1] == 'board')
+			{
+				_uciWrite('info string Current state of the board :');
+				for (_y=0 ; _y<8 ; _y++)
+				{
+					_buffer = '';
+					for (_x=0 ; _x<8 ; _x++)
+					{
+						_j = 21 + 10*_y + _x;
+						if (_buffer.length > 0)
+							_buffer += ' ';
+						if (I[_j] < 10)
+							_buffer += ' ';
+						_buffer += (I[_j] ? I[_j] : '.');
+					}
+					_uciWrite('info string   '+_buffer);
+				}
+			}
+			else if (_tab[1] == 'quality')
+			{
+				_list = [
+					// String: name of the test case
+					// Array: [ uci command to run ; expected result ; string to be contained in the last emitted message ]
+
+					['uci',        true, ''],
+					['isready',    true, 'readyok'],
+					['ucinewgame', true, ''],
+
+					'Normal move for White',
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -', true, ''],
+					['go depth 4', true, ''],
+
+					'Normal move for Black',
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -', true, ''],
+					['go depth 4', true, ''],
+
+					'Move with taken piece for White',
+					['position fen rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -', true, ''],
+					['go depth 6', true, 'e4d5'],
+
+					'Move with taken piece for Black',
+					['position fen rnbqkbnr/ppp1pppp/8/3P4/8/8/PPPP1PPP/RNBQKBNR b KQkq -', true, ''],
+					['go depth 6', true, 'd8d5'],
+
+					'Promotion for White',
+					['position fen 1k6/7P/1K6/8/8/8/8/8 w - -', true, ''],
+					['go depth 4', true, 'h7h8q'],
+
+					'Promotion for Black',
+					['position fen 8/8/8/8/8/1k6/7p/1K6 b - -', true, ''],
+					['go depth 4', true, 'h2h1q'],
+
+					'En passant for White',
+					['position fen 1k6/8/1K6/6pP/8/8/8/8 w - g6', true, ''],
+					['go depth 4', true, 'h5g6'],
+
+					'En passant for Black',
+					['position fen 1k6/8/1K6/8/5pP1/8/8/8 b - g3', true, ''],
+					['go depth 4', true, 'f4g3'],
+
+					'Short/King castling for White',
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq -', true, ''],
+					['debug move e1g1', true, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQ -', true, ''],
+					['debug move e1g1', true, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w kq -', true, ''],
+					['debug move e1g1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w - -', true, ''],
+					['debug move e1g1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w K -', true, ''],
+					['debug move e1g1', true, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w Q -', true, ''],
+					['debug move e1g1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w k -', true, ''],
+					['debug move e1g1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w q -', true, ''],
+					['debug move e1g1', false, ''],
+
+					'Short/King castling for Black',
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -', true, ''],
+					['debug move e8g8', true, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQ -', true, ''],
+					['debug move e8g8', false, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b kq -', true, ''],
+					['debug move e8g8', true, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b - -', true, ''],
+					['debug move e8g8', false, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b K -', true, ''],
+					['debug move e8g8', false, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b Q -', true, ''],
+					['debug move e8g8', false, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b k -', true, ''],
+					['debug move e8g8', true, ''],
+					['position fen rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b q -', true, ''],
+					['debug move e8g8', false, ''],
+
+					'Long/Queen castling for White',
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w KQkq -', true, ''],
+					['debug move e1c1', true, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w KQ -', true, ''],
+					['debug move e1c1', true, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w kq -', true, ''],
+					['debug move e1c1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w - -', true, ''],
+					['debug move e1c1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w K -', true, ''],
+					['debug move e1c1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w Q -', true, ''],
+					['debug move e1c1', true, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w k -', true, ''],
+					['debug move e1c1', false, ''],
+					['position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R3KBNR w q -', true, ''],
+					['debug move e1c1', false, ''],
+
+					'Long/Queen castling for Black',
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq -', true, ''],
+					['debug move e8c8', true, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQ -', true, ''],
+					['debug move e8c8', false, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b kq -', true, ''],
+					['debug move e8c8', true, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b - -', true, ''],
+					['debug move e8c8', false, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b K -', true, ''],
+					['debug move e8c8', false, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b Q -', true, ''],
+					['debug move e8c8', false, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b k -', true, ''],
+					['debug move e8c8', false, ''],
+					['position fen r3kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b q -', true, ''],
+					['debug move e8c8', true, ''],
+
+					'Initial position with additional complex moves',
+					['position fen 7k/8/8/5K2/2p3Q1/2P5/P4P2/8 w - - 5 53 moves a2a4', true, ''],
+					['go depth 3', true, ''],
+
+					'Invalid number of kings in the position',
+					['position fen k/8/8/8/8/8/8/K w - -',    true,  ''],
+					['position fen 8/8/8/8/8/8/8/8 b - -',    false, ''],
+					['position fen k6k/8/8/8/8/K7/8/8 w - -', false, ''],
+					['position fen k6k/8/8/8/8/8/8/8 w - -',  false, ''],
+					['position fen 8/8/8/8/8/KK6/8/8 w - -',  false, ''],
+					['position fen k7/8/8/8/8/K6K/8/8 w - -', false, '']
+				];
+				for (_x=0 ; _x<_list.length ; _x++)
+				{
+					if (typeof _list[_x] === 'string')
+						_uciWrite('info string --- Running test case: '+_list[_x]);
+					else
+					{
+						if (	(_uciProcess(_list[_x][0]) != _list[_x][1]) ||
+								((_list[_x][2].length > 0) && (_uciLast.indexOf(_list[_x][2]) === -1))
+							)
+						{
+							_uciWrite('info string Error : the quality check failed on "'+_list[_x][0]+'" (step #'+_x+')');
+							return false;
+						}
+						else
+							if (!_list[_x][1])
+								_uciWrite('info string This error was awaited by the quality test plan');
+					}
+				}
+				_uciWrite('info string Info : the quality check is successfully completed with no error');
 			}
 			else
 			{
@@ -340,6 +484,8 @@ function _uciProcess(pLine)
 			break;
 		}
 	}
+	
+	return true;
 }
 
 function _uciReset()
@@ -364,7 +510,8 @@ function _uciReset()
 
 function _uciLoadFen(pFen)
 {
-	var	_list, _x, _y, _i, _car, _castB, _castW, _black;
+	var	_list, _car, _black, _piece, _cast, _obj,
+		_i, _x, _y, _initial;
 
 	//-- Checks
 	if (pFen.length === 0)
@@ -376,8 +523,20 @@ function _uciLoadFen(pFen)
 		return false;
 
 	//-- Castling
-	_castB = _list[2].match(/k/) || _list[2].match(/q/);
-	_castW = _list[2].match(/K/) || _list[2].match(/Q/);
+	_cast = [
+		{	index : 0,																	//White
+			rook  : [_list[2].match(/Q/)!==null, _list[2].match(/K/)!==null],
+			row   : 7,
+			kingC : 0
+		},
+		{	index : 0,																	//Black
+			rook  : [_list[2].match(/q/)!==null, _list[2].match(/k/)!==null],
+			row   : 0,
+			kingC : 0
+		}
+	];
+	_cast[0].king = (_cast[0].rook[0] || _cast[0].rook[1]);
+	_cast[1].king = (_cast[1].rook[0] || _cast[1].rook[1]);
 
 	//-- Loads the main position
 	_uciReset();
@@ -400,7 +559,24 @@ function _uciLoadFen(pFen)
 			else
 			{
 				_black = (_car == _car.toLowerCase());
-				I[21+10*_y+_x] = ((_black&&_castB)||(!_black&&_castW) ? 16 : 0) | (_black ? 0 : 8) | ' pknbrq'.indexOf(_car.toLowerCase());
+				_piece = ' pknbrq'.indexOf(_car.toLowerCase());
+				_obj = _cast[_black&1];
+				if (_piece == 2)
+					_obj.kingC++;
+				if (	((_piece == 1) && (_y == (_black?1:6))) ||						//Pawn
+						((_piece == 2) && _obj.king) ||									//King
+						((_piece == 5) && _obj.rook[_obj.index] && (_y == _obj.row))	//Rook
+					)
+				{
+					_initial = 16;
+					if (_piece == 5)
+						_obj.rook[_obj.index] = false;
+					if (_piece == 2)
+						_obj.index = 1;
+				}
+				else
+					_initial = 0;
+				I[21+10*_y+_x] = _initial | (_black ? 0 : 8) | _piece;
 				_x++;
 			}
 		}
@@ -414,7 +590,7 @@ function _uciLoadFen(pFen)
 	//-- En passant
 	u = (_list[3] == '-' ? 0 : _uciCoordinateToId(_list[3]) + (y==8 ? -10 : 10));
 
-	return true;
+	return ((_cast[0].kingC == 1) && (_cast[1].kingC == 1));
 }
 
 function _uciCoordinateToId(pCoordinate)

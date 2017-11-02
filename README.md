@@ -9,10 +9,10 @@ This UCI version is a derivative work of the library Toledo NanoChess released i
 - Undo the last move without losing your game.
 - With pyChess' slider, select the strength of the AI when you start a new game (6 is a good value).
 - Toledo plays both White and Black.
-- Play Chess960.
+- Play Chess960 with unsupported castling.
 - Information about the analysis : processing time, nodes, nodes per second...
 
-Despite it was coded and tested in just two days, this UCI port doesn't aim to be the smallest one in the world... ;-)
+Despite it was coded and tested in just three days, this UCI port doesn't aim to be the smallest one in the world... ;-)
 
 
 ## Install
@@ -42,10 +42,13 @@ Refer to the header of the main JavaScript file to know more about the license.
 - `isready`
 - `ucinewgame`
 - `position startpos`
-- `position startpos moves e2e4` with as many moves as needed
+- `position startpos moves (string)` with as many moves written in UCI format (like `e2e3`) as needed
 - `position fen (string)` where *(string)* is a complete position in FEN format
+- `position fen (string) moves (string)`
 - `debug` displays Toledo NanoChess' internal variables
 - `debug move (string)` where *(string)* is a move to perform written in UCI format (like `a2a1q`)
+- `debug board` displays the internal board
+- `debug quality` executes the automated quality check
 - `go`
 - `go depth (number)` where *(number)* is the forced depth to reach (it temporarily overrides the current strength of the AI)
 - `quit`
